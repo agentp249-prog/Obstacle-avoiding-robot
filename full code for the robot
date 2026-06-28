@@ -1,0 +1,260 @@
+#include <Servo.h>
+#include <SoftwareSerial.h>
+
+SoftwareSerial BT(2, 3);
+Servo scanServo;
+
+// HC-SR04
+#define TRIG_PIN 9
+#define ECHO_PIN 8
+
+// Servo
+#define SERVO_PIN 4
+
+// L298N
+#define ENA 5
+#define IN1 6
+#define IN2 7
+
+#define ENB 10
+#define IN3 11
+#define IN4 12
+
+int motorSpeed = 120;
+
+bool autoMode = true;
+char command;
+unsigned long lastSend = 0;
+
+// ---------------- DISTANCE ----------------
+
+long getDistance() {
+
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 25000);
+
+  if (duration == 0)
+    return 400;
+
+  return duration * 0.034 / 2;
+}
+
+// ---------------- MOTORS ----------------
+
+void moveForward() {
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void moveBackward() {
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void turnLeft() {
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void turnRight() {
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void stopRobot() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+// ---------------- SETUP ----------------
+
+void setup() {
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  scanServo.attach(SERVO_PIN);
+  scanServo.write(90);
+
+  BT.begin(9600);
+
+  stopRobot();
+
+  delay(1000);
+}
+
+// ---------------- LOOP ----------------
+
+void loop() {
+
+  // Send distance to phone
+  if (millis() - lastSend > 500) {
+    BT.print("Distance: ");
+    BT.print(getDistance());
+    BT.println(" cm");
+    lastSend = millis();
+  }
+
+  // Bluetooth Commands
+  if (BT.available()) {
+
+    command = BT.read();
+
+    switch (command) {
+
+      case 'A':
+        autoMode = true;
+        stopRobot();
+        break;
+
+      case 'M':
+        autoMode = false;
+        stopRobot();
+        break;
+
+      case '+':
+        motorSpeed += 10;
+        if (motorSpeed > 255) motorSpeed = 255;
+        break;
+
+      case '-':
+        motorSpeed -= 10;
+        if (motorSpeed < 80) motorSpeed = 80;
+        break;
+    }
+
+    if (!autoMode) {
+
+      switch (command) {
+
+        case 'F':
+          if (getDistance() > 20)
+            moveForward();
+          else
+            stopRobot();
+          break;
+
+        case 'B':
+          moveBackward();
+          break;
+
+        case 'L':
+          turnLeft();
+          break;
+
+        case 'R':
+          turnRight();
+          break;
+
+        case 'S':
+          stopRobot();
+          break;
+      }
+    }
+  }
+
+  // Manual mode
+  if (!autoMode) {
+
+    if (getDistance() < 15) {
+      stopRobot();
+    }
+
+    return;
+  }
+
+  // ---------- AUTO MODE ----------
+
+  long frontDistance = getDistance();
+
+  if (frontDistance > 30) {
+
+    scanServo.write(90);
+    moveForward();
+
+  } else {
+
+    stopRobot();
+    delay(100);
+
+    moveBackward();
+    delay(200);
+
+    stopRobot();
+    delay(100);
+
+    // Look Left
+    scanServo.write(150);
+    delay(300);
+    long leftDistance = getDistance();
+
+    // Look Right
+    scanServo.write(30);
+    delay(300);
+    long rightDistance = getDistance();
+
+    // Center
+    scanServo.write(90);
+    delay(150);
+
+    if (leftDistance > rightDistance) {
+
+      turnLeft();
+      delay(350);
+
+    } else {
+
+      turnRight();
+      delay(350);
+    }
+
+    stopRobot();
+    delay(100);
+  }
+}
